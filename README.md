@@ -28,8 +28,6 @@
     }
 
     #app-wrapper { display: flex; flex-direction: column; height: 100vh; }
-    .logout-btn { position: absolute; top: 1.2rem; right: 1.2rem; background: rgba(255,255,255,0.05); border: 1px solid var(--text-muted); color: var(--text-muted); padding: 0.5rem 0.9rem; border-radius: 6px; cursor: pointer; z-index: 50; font-size: 0.85rem; transition: all 0.2s; }
-    .logout-btn:hover { border-color: var(--danger); color: var(--danger); }
     .header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: var(--border); background: rgba(10,11,15,0.8); backdrop-filter: blur(10px); flex-shrink: 0; }
     .logo { font-size: 1.5rem; font-weight: 800; background: linear-gradient(90deg, var(--neon-green), var(--neon-blue)); -webkit-background-clip: text; background-clip: text; color: transparent; }
     .status-panel span { margin-left: 1rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-muted); }
@@ -181,7 +179,7 @@
           </div>
           <div class="io-toggles-row">
             <button class="io-btn" id="btn-input-mono">🔀 MONO</button>
-            <button class="io-btn active" id="btn-noise-reduction"> NR ON</button>
+            <button class="io-btn active" id="btn-noise-reduction">🔇 NR ON</button>
             <button class="io-btn mute-btn" id="btn-input-mute">🔇 MUTE</button>
             <div class="io-status-badge" id="input-mode-indicator">STEREO</div>
           </div>
@@ -486,25 +484,32 @@
       engine: null,
       io: null,
       init() {
-        // Crear contexto solo después de interacción (política de autoplay)
+        // Inicialización diferida para cumplir con políticas de autoplay
         const initAudio = async () => {
           this.ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000, latencyHint: 'interactive' });
           if(this.ctx.state === 'suspended') await this.ctx.resume();
+          
+          // Inicializar motor de procesamiento
           this.engine = new AudioProcessor(this.ctx);
+          // Inicializar I/O Routing
           this.io = new IORouting(this.ctx, this.engine);
+          
           this.bindControls();
           Presets.init();
           Tabs.init();
           Meters.startLoop();
           document.removeEventListener('click', initAudio);
+          console.log('[Nexus] Sistema de audio inicializado y listo.');
         };
+        
+        // Escuchar primer clic para iniciar audio
         document.addEventListener('click', initAudio, { once: true });
       },
       bindControls() {
         document.getElementById('btn-start').addEventListener('click', () => {
           if(!this.engine.source) {
             this.engine.play(this.engine.generateTestTone());
-            document.getElementById('btn-start').textContent = ' Pause';
+            document.getElementById('btn-start').textContent = '⏸ Pause';
             document.getElementById('btn-start').classList.add('active');
           } else {
             this.engine.stop();
@@ -539,20 +544,40 @@
       constructor(ctx) {
         this.ctx = ctx;
         this.source = null;
-        this.params = { lessmore:9.5, passthrough:0, agcThreshold:-18, agcAttack:10, hfBoost:3, stereoWidth:50, eqLow:0, eqMid:0, eqHigh:0, compThreshold:-14, compRatio:4 };
+        this.params = { 
+          lessmore:9.5, passthrough:0, agcThreshold:-18, agcAttack:10, agcRatio:3,
+          hfBoost:3, stereoWidth:50, eqLow:0, eqMid:0, eqHigh:0, compThreshold:-14, compRatio:4 
+        };
         this.initChain();
       }
       initChain() {
+        // Analyzers
         this.inputAnalyser = this.ctx.createAnalyser(); this.inputAnalyser.fftSize = 2048;
-        this.agc = this.ctx.createDynamicsCompressor(); this.agc.threshold.value = this.params.agcThreshold; this.agc.attack.value = this.params.agcAttack/1000; this.agc.ratio.value = 3;
-        this.eqLow = this.ctx.createBiquadFilter(); this.eqLow.type = 'lowshelf'; this.eqLow.frequency.value = 100; this.eqLow.gain.value = this.params.eqLow;
-        this.eqMid = this.ctx.createBiquadFilter(); this.eqMid.type = 'peaking'; this.eqMid.frequency.value = 1000; this.eqMid.gain.value = this.params.eqMid;
-        this.eqHigh = this.ctx.createBiquadFilter(); this.eqHigh.type = 'highshelf'; this.eqHigh.frequency.value = 10000; this.eqHigh.gain.value = this.params.eqHigh;
-        this.hfEnhancer = this.ctx.createBiquadFilter(); this.hfEnhancer.type = 'highshelf'; this.hfEnhancer.frequency.value = 3000; this.hfEnhancer.gain.value = this.params.hfBoost;
-        this.compressor = this.ctx.createDynamicsCompressor(); this.compressor.threshold.value = this.params.compThreshold; this.compressor.ratio.value = this.params.compRatio;
         this.outputAnalyser = this.ctx.createAnalyser(); this.outputAnalyser.fftSize = 2048;
 
-        this.inputAnalyser.connect(this.agc).connect(this.eqLow).connect(this.eqMid).connect(this.eqHigh).connect(this.hfEnhancer).connect(this.compressor).connect(this.outputAnalyser);
+        // Nodes
+        this.agc = this.ctx.createDynamicsCompressor(); 
+        this.agc.threshold.value = this.params.agcThreshold; 
+        this.agc.attack.value = this.params.agcAttack/1000; 
+        this.agc.ratio.value = this.params.agcRatio;
+
+        this.eqLow = this.ctx.createBiquadFilter(); this.eqLow.type = 'lowshelf'; this.eqLow.frequency.value = 100; this.eqLow.gain.value = this.params.eqLow;
+        this.eqMid = this.ctx.createBiquadFilter(); this.eqMid.type = 'peaking'; this.eqMid.frequency.value = 1000; this.eqMid.Q.value = 1; this.eqMid.gain.value = this.params.eqMid;
+        this.eqHigh = this.ctx.createBiquadFilter(); this.eqHigh.type = 'highshelf'; this.eqHigh.frequency.value = 10000; this.eqHigh.gain.value = this.params.eqHigh;
+        
+        this.hfEnhancer = this.ctx.createBiquadFilter(); this.hfEnhancer.type = 'highshelf'; this.hfEnhancer.frequency.value = 3000; this.hfEnhancer.gain.value = this.params.hfBoost;
+        
+        this.compressor = this.ctx.createDynamicsCompressor(); 
+        this.compressor.threshold.value = this.params.compThreshold; 
+        this.compressor.ratio.value = this.params.compRatio;
+        this.compressor.knee.value = 10;
+
+        // Chain: Input -> Analyser -> AGC -> EQ Low -> EQ Mid -> EQ High -> HF -> Compressor -> Analyser -> Output
+        this.inputAnalyser.connect(this.agc)
+          .connect(this.eqLow).connect(this.eqMid).connect(this.eqHigh)
+          .connect(this.hfEnhancer)
+          .connect(this.compressor)
+          .connect(this.outputAnalyser);
       }
       play(buffer) {
         if(this.source) { this.source.stop(); this.source.disconnect(); }
@@ -563,23 +588,39 @@
       }
       stop() { if(this.source) { this.source.stop(); this.source.disconnect(); this.source = null; } }
       generateTestTone() {
-        const sr = this.ctx.sampleRate, dur = 5, len = sr * dur;
+        // Genera ruido rosa con un tono de prueba audible (1kHz sweep)
+        const sr = this.ctx.sampleRate, dur = 10, len = sr * dur;
         const buf = this.ctx.createBuffer(2, len, sr);
-        let last = 0;
-        for(let ch=0; ch<2; ch++) { const d = buf.getChannelData(ch); for(let i=0; i<len; i++) { const w = Math.random()*2-1; d[i] = (last + 0.02*w)/1.02; last = d[i]; d[i]*=0.3; } }
+        let lastOut = 0, phase = 0;
+        for(let ch=0; ch<2; ch++) { 
+          const d = buf.getChannelData(ch); 
+          for(let i=0; i<len; i++) { 
+            const white = Math.random()*2-1;
+            // Pink noise approximation
+            d[i] = (lastOut + (0.02 * white)) / 1.02;
+            lastOut = d[i];
+            // Add sine wave sweep for testing EQ
+            const t = i / sr;
+            const freq = 200 + (t * 50); // 200Hz to 700Hz sweep
+            d[i] += 0.2 * Math.sin(2 * Math.PI * freq * t + phase);
+            d[i] *= 0.8; 
+          } 
+        }
         return buf;
       }
       updateParam(p, v) {
         this.params[p] = parseFloat(v);
+        const val = this.params[p];
         switch(p) {
-          case 'agcThreshold': this.agc.threshold.value = this.params.agcThreshold; break;
-          case 'agcAttack': this.agc.attack.value = this.params.agcAttack/1000; break;
-          case 'hfBoost': this.hfEnhancer.gain.value = this.params.hfBoost; break;
-          case 'eqLow': this.eqLow.gain.value = this.params.eqLow; break;
-          case 'eqMid': this.eqMid.gain.value = this.params.eqMid; break;
-          case 'eqHigh': this.eqHigh.gain.value = this.params.eqHigh; break;
-          case 'compThreshold': this.compressor.threshold.value = this.params.compThreshold; break;
-          case 'compRatio': this.compressor.ratio.value = this.params.compRatio; break;
+          case 'agcThreshold': this.agc.threshold.value = val; break;
+          case 'agcAttack': this.agc.attack.value = val/1000; break;
+          case 'agcRatio': this.agc.ratio.value = val; break;
+          case 'hfBoost': this.hfEnhancer.gain.value = val; break;
+          case 'eqLow': this.eqLow.gain.value = val; break;
+          case 'eqMid': this.eqMid.gain.value = val; break;
+          case 'eqHigh': this.eqHigh.gain.value = val; break;
+          case 'compThreshold': this.compressor.threshold.value = val; break;
+          case 'compRatio': this.compressor.ratio.value = val; break;
         }
       }
     }
@@ -590,23 +631,42 @@
     class IORouting {
       constructor(ctx, engine) {
         this.ctx = ctx; this.engine = engine;
+        
+        // I/O Nodes
         this.inputGain = ctx.createGain(); this.inputGain.gain.value = 1;
         this.micGain = ctx.createGain(); this.micGain.gain.value = 0.8;
-        this.monoSplit = ctx.createChannelSplitter(2); this.monoMerge = ctx.createChannelMerger(2);
+        this.monoSplit = ctx.createChannelSplitter(2); 
+        this.monoMerge = ctx.createChannelMerger(2);
         this.stereoPanner = ctx.createStereoPanner(); this.stereoPanner.pan.value = 0;
-        this.outputLimiter = ctx.createDynamicsCompressor(); this.outputLimiter.threshold.value = -0.5; this.outputLimiter.ratio.value = 20; this.outputLimiter.knee.value = 0;
+        this.outputLimiter = ctx.createDynamicsCompressor(); 
+        this.outputLimiter.threshold.value = -0.5; this.outputLimiter.ratio.value = 20; this.outputLimiter.knee.value = 0;
         this.masterGain = ctx.createGain(); this.masterGain.gain.value = 1;
         this.headphoneMix = ctx.createGain(); this.headphoneMix.gain.value = 0;
-        this.isMono = false; this.isMuted = false; this.isNR = true; this.isLimiter = true; this.isMonitor = false; this.clipTimer = null;
         
-        this.initGraph(); this.bindControls(); this.loadDevices();
+        // State
+        this.isMono = false; this.isMuted = false; this.isNR = true; 
+        this.isLimiter = true; this.isMonitor = false; 
+        this.clipTimer = null;
+        
+        this.initGraph(); 
+        this.bindControls(); 
+        this.loadDevices();
       }
       initGraph() {
-        this.monoSplit.connect(this.monoMerge, 0, 0); this.monoSplit.connect(this.monoMerge, 1, 1);
+        // Input Chain: InputGain -> MicGain -> MonoSplit -> MonoMerge -> Engine Input
+        this.monoSplit.connect(this.monoMerge, 0, 0); 
+        this.monoSplit.connect(this.monoMerge, 1, 1);
         this.inputGain.connect(this.micGain).connect(this.monoSplit);
         this.monoMerge.connect(this.engine.inputAnalyser);
         
-        this.engine.outputAnalyser.connect(this.stereoPanner).connect(this.outputLimiter).connect(this.masterGain).connect(this.headphoneMix).connect(this.ctx.destination);
+        // Output Chain: Engine Output -> StereoPanner -> Limiter -> MasterGain -> HeadphoneMix -> Destination
+        this.engine.outputAnalyser.connect(this.stereoPanner)
+          .connect(this.outputLimiter)
+          .connect(this.masterGain)
+          .connect(this.headphoneMix)
+          .connect(this.ctx.destination);
+        
+        // Headphone monitor direct path
         this.masterGain.connect(this.ctx.destination);
       }
       async loadDevices() {
@@ -614,106 +674,169 @@
           const devs = await navigator.mediaDevices.enumerateDevices();
           const inSel = document.getElementById('input-device-select');
           const outSel = document.getElementById('output-device-select');
-          inSel.innerHTML = ''; outSel.innerHTML = '<option value="">Default System Output</option>';
+          inSel.innerHTML = ''; 
+          outSel.innerHTML = '<option value="">Default System Output</option>';
           
           devs.forEach(d => {
-            const opt = document.createElement('option'); opt.value = d.deviceId; opt.text = d.label || `${d.kind} ${d.deviceId.slice(0,8)}...`;
+            const opt = document.createElement('option'); 
+            opt.value = d.deviceId; 
+            opt.text = d.label || `${d.kind} ${d.deviceId.slice(0,8)}...`;
             if(d.kind === 'audioinput') inSel.appendChild(opt);
             if(d.kind === 'audiooutput') outSel.appendChild(opt);
           });
-          if(inSel.options.length > 0) { inSel.value = inSel.options[0].value; this.startInput(inSel.value); }
+          if(inSel.options.length > 0) { 
+            inSel.value = inSel.options[0].value; 
+            this.startInput(inSel.value); 
+          }
         } catch(e) { console.warn('Devices error:', e); }
       }
       async startInput(id) {
         if(this.stream) this.stream.getTracks().forEach(t => t.stop());
         try {
-          this.stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: id ? {exact:id} : undefined, echoCancellation: this.isNR, noiseSuppression: this.isNR, autoGainControl: false } });
+          this.stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { 
+              deviceId: id ? {exact:id} : undefined, 
+              echoCancellation: this.isNR, 
+              noiseSuppression: this.isNR, 
+              autoGainControl: false 
+            } 
+          });
           const src = this.ctx.createMediaStreamSource(this.stream);
           src.connect(this.inputGain);
         } catch(e) { console.error('Mic error:', e); }
       }
       bindControls() {
         const bind = (id, node, param, dispId, suffix='', tx=v=>v) => {
-          document.getElementById(id).addEventListener('input', e => {
+          const el = document.getElementById(id);
+          if(!el) return;
+          el.addEventListener('input', e => {
             const v = tx(parseFloat(e.target.value));
             if(node[param]) node[param].value = v;
-            document.getElementById(dispId).textContent = e.target.value + suffix;
+            const dispEl = document.getElementById(dispId);
+            if(dispEl) dispEl.textContent = e.target.value + suffix;
           });
         };
+        
+        // Bind I/O Controls
         bind('input-gain', this.inputGain, 'gain', 'val-input-gain', ' dB', v=>Math.pow(10,v/20));
         bind('mic-level', this.micGain, 'gain', 'val-mic-level', '%', v=>v/100);
         bind('master-volume', this.masterGain, 'gain', 'val-master-vol', ' dB', v=>Math.pow(10,v/20));
         
-        document.getElementById('output-balance').addEventListener('input', e => {
-          this.stereoPanner.pan.value = e.target.value/100;
-          document.getElementById('val-balance').textContent = e.target.value==0 ? 'C' : (e.target.value<0 ? `L${Math.abs(e.target.value)}` : `R${e.target.value}`);
+        // Balance
+        const balEl = document.getElementById('output-balance');
+        if(balEl) {
+          balEl.addEventListener('input', e => {
+            this.stereoPanner.pan.value = e.target.value/100;
+            document.getElementById('val-balance').textContent = e.target.value==0 ? 'C' : (e.target.value<0 ? `L${Math.abs(e.target.value)}` : `R${e.target.value}`);
+          });
+        }
+
+        // Device Selectors
+        const inSel = document.getElementById('input-device-select');
+        if(inSel) inSel.addEventListener('change', e => this.startInput(e.target.value));
+        
+        const outSel = document.getElementById('output-device-select');
+        if(outSel) outSel.addEventListener('change', async e => {
+          if(e.target.value && this.ctx.destination.setSinkId) {
+            try { await this.ctx.destination.setSinkId(e.target.value); } catch(err){}
+          }
         });
 
-        document.getElementById('input-device-select').addEventListener('change', e => this.startInput(e.target.value));
-        document.getElementById('output-device-select').addEventListener('change', async e => {
-          if(e.target.value && this.ctx.destination.setSinkId) try { await this.ctx.destination.setSinkId(e.target.value); } catch(err){}
-        });
+        // Toggles
+        const bindToggle = (id, prop, activeCb, inactiveCb) => {
+          const btn = document.getElementById(id);
+          if(!btn) return;
+          btn.addEventListener('click', e => {
+            this[prop] = !this[prop];
+            btn.classList.toggle('active');
+            if(this[prop]) activeCb(e); else inactiveCb(e);
+          });
+        };
 
-        document.getElementById('btn-input-mono').addEventListener('click', e => {
-          this.isMono = !this.isMono; e.target.classList.toggle('active');
-          document.getElementById('input-mode-indicator').textContent = this.isMono ? 'MONO' : 'STEREO';
-          this.monoMerge.disconnect(); this.monoSplit.disconnect();
-          this.inputGain.connect(this.micGain).connect(this.monoSplit);
-          if(this.isMono) { this.monoSplit.connect(this.monoMerge, 0, 0); this.monoSplit.connect(this.monoMerge, 0, 1); }
-          else { this.monoSplit.connect(this.monoMerge, 0, 0); this.monoSplit.connect(this.monoMerge, 1, 1); }
-          this.monoMerge.connect(this.engine.inputAnalyser);
-        });
+        bindToggle('btn-input-mono', 'isMono', 
+          () => {
+            document.getElementById('input-mode-indicator').textContent = 'MONO';
+            this.monoMerge.disconnect(); this.monoSplit.disconnect();
+            this.inputGain.connect(this.micGain).connect(this.monoSplit);
+            this.monoSplit.connect(this.monoMerge, 0, 0); 
+            this.monoSplit.connect(this.monoMerge, 0, 1);
+            this.monoMerge.connect(this.engine.inputAnalyser);
+          },
+          () => {
+            document.getElementById('input-mode-indicator').textContent = 'STEREO';
+            this.monoMerge.disconnect(); this.monoSplit.disconnect();
+            this.inputGain.connect(this.micGain).connect(this.monoSplit);
+            this.monoSplit.connect(this.monoMerge, 0, 0); 
+            this.monoSplit.connect(this.monoMerge, 1, 1);
+            this.monoMerge.connect(this.engine.inputAnalyser);
+          }
+        );
 
-        document.getElementById('btn-noise-reduction').addEventListener('click', e => {
-          this.isNR = !this.isNR; e.target.classList.toggle('active'); e.target.textContent = this.isNR ? '🔇 NR ON' : '🔇 NR OFF';
-          if(this.stream) this.startInput(document.getElementById('input-device-select').value);
-        });
+        bindToggle('btn-noise-reduction', 'isNR',
+          (e) => { e.target.textContent = '🔇 NR ON'; if(this.stream) this.startInput(document.getElementById('input-device-select').value); },
+          (e) => { e.target.textContent = '🔇 NR OFF'; if(this.stream) this.startInput(document.getElementById('input-device-select').value); }
+        );
 
-        document.getElementById('btn-input-mute').addEventListener('click', e => {
-          this.isMuted = !this.isMuted; e.target.classList.toggle('active');
-          this.inputGain.gain.value = this.isMuted ? 0 : Math.pow(10, parseFloat(document.getElementById('input-gain').value)/20);
-        });
+        bindToggle('btn-input-mute', 'isMuted',
+          (e) => { this.inputGain.gain.value = 0; },
+          (e) => { const v = parseFloat(document.getElementById('input-gain').value); this.inputGain.gain.value = Math.pow(10,v/20); }
+        );
 
-        document.getElementById('btn-output-limiter').addEventListener('click', e => {
-          this.isLimiter = !this.isLimiter; e.target.classList.toggle('active');
-          this.stereoPanner.disconnect(); this.outputLimiter.disconnect();
-          if(this.isLimiter) { this.stereoPanner.connect(this.outputLimiter); this.outputLimiter.connect(this.masterGain); }
-          else { this.stereoPanner.connect(this.masterGain); }
-        });
+        bindToggle('btn-output-limiter', 'isLimiter',
+          (e) => {
+            this.stereoPanner.disconnect(); this.outputLimiter.disconnect();
+            this.stereoPanner.connect(this.outputLimiter);
+            this.outputLimiter.connect(this.masterGain);
+          },
+          (e) => {
+            this.stereoPanner.disconnect(); this.outputLimiter.disconnect();
+            this.stereoPanner.connect(this.masterGain);
+          }
+        );
 
-        document.getElementById('btn-headphone-monitor').addEventListener('click', e => {
-          this.isMonitor = !this.isMonitor; e.target.classList.toggle('active');
-          this.headphoneMix.gain.value = this.isMonitor ? 0.7 : 0;
-        });
+        bindToggle('btn-headphone-monitor', 'isMonitor',
+          (e) => { this.headphoneMix.gain.value = 0.7; },
+          (e) => { this.headphoneMix.gain.value = 0; }
+        );
       }
     }
 
     // ==========================================
-    // PRESETS SYSTEM
+    // PRESETS SYSTEM (FIXED)
     // ==========================================
     const Presets = {
-      data: {
-        'broadcast-hd': { name:'Broadcast HD', mode:'Music', lufs:-14, params:{lessmore:9.5,passthrough:0,agcThreshold:-18,agcAttack:10,hfBoost:3,stereoWidth:50,eqLow:0,eqMid:0,eqHigh:0,compThreshold:-14,compRatio:4} },
-        'voice-over': { name:'Voice Over Pro', mode:'Voice', lufs:-16, params:{lessmore:7,passthrough:2,agcThreshold:-20,agcAttack:5,hfBoost:6,stereoWidth:30,eqLow:-2,eqMid:3,eqHigh:4,compThreshold:-16,compRatio:3} },
-        'music-master': { name:'Music Master', mode:'Music', lufs:-10, params:{lessmore:8.5,passthrough:-1,agcThreshold:-16,agcAttack:15,hfBoost:4,stereoWidth:75,eqLow:2,eqMid:1,eqHigh:2,compThreshold:-10,compRatio:6} },
-        'podcast-studio': { name:'Podcast Studio', mode:'Voice', lufs:-16, params:{lessmore:6,passthrough:1,agcThreshold:-22,agcAttack:8,hfBoost:5,stereoWidth:20,eqLow:-1,eqMid:2,eqHigh:3,compThreshold:-16,compRatio:2.5} },
-        'radio-fm': { name:'Radio FM', mode:'Music', lufs:-12, params:{lessmore:9,passthrough:0,agcThreshold:-15,agcAttack:12,hfBoost:5,stereoWidth:60,eqLow:1,eqMid:2,eqHigh:3,compThreshold:-12,compRatio:5} },
-        'streaming-live': { name:'Streaming Live', mode:'Mixed', lufs:-14, params:{lessmore:7.5,passthrough:0,agcThreshold:-18,agcAttack:10,hfBoost:4,stereoWidth:45,eqLow:0,eqMid:1,eqHigh:2,compThreshold:-14,compRatio:4} },
-        'audiobook': { name:'Audiobook', mode:'Voice', lufs:-18, params:{lessmore:5,passthrough:2,agcThreshold:-24,agcAttack:6,hfBoost:3,stereoWidth:15,eqLow:-3,eqMid:1,eqHigh:2,compThreshold:-18,compRatio:2} },
-        'club-dj': { name:'Club/DJ', mode:'Music', lufs:-9, params:{lessmore:10,passthrough:-2,agcThreshold:-12,agcAttack:20,hfBoost:6,stereoWidth:85,eqLow:3,eqMid:0,eqHigh:4,compThreshold:-9,compRatio:8} }
+       {
+        'broadcast-hd': { name:'Broadcast HD', mode:'Music', lufs:-14, params:{lessmore:9.5,passthrough:0,agcThreshold:-18,agcAttack:10,agcRatio:3,hfBoost:3,stereoWidth:50,eqLow:0,eqMid:0,eqHigh:0,compThreshold:-14,compRatio:4,masterVolume:0} },
+        'voice-over': { name:'Voice Over Pro', mode:'Voice', lufs:-16, params:{lessmore:7,passthrough:2,agcThreshold:-20,agcAttack:5,agcRatio:3,hfBoost:6,stereoWidth:30,eqLow:-2,eqMid:3,eqHigh:4,compThreshold:-16,compRatio:3,masterVolume:2} },
+        'music-master': { name:'Music Master', mode:'Music', lufs:-10, params:{lessmore:8.5,passthrough:-1,agcThreshold:-16,agcAttack:15,agcRatio:4,hfBoost:4,stereoWidth:75,eqLow:2,eqMid:1,eqHigh:2,compThreshold:-10,compRatio:6,masterVolume:-1} },
+        'podcast-studio': { name:'Podcast Studio', mode:'Voice', lufs:-16, params:{lessmore:6,passthrough:1,agcThreshold:-22,agcAttack:8,agcRatio:2.5,hfBoost:5,stereoWidth:20,eqLow:-1,eqMid:2,eqHigh:3,compThreshold:-16,compRatio:2.5,masterVolume:1} },
+        'radio-fm': { name:'Radio FM', mode:'Music', lufs:-12, params:{lessmore:9,passthrough:0,agcThreshold:-15,agcAttack:12,agcRatio:5,hfBoost:5,stereoWidth:60,eqLow:1,eqMid:2,eqHigh:3,compThreshold:-12,compRatio:5,masterVolume:0} },
+        'streaming-live': { name:'Streaming Live', mode:'Mixed', lufs:-14, params:{lessmore:7.5,passthrough:0,agcThreshold:-18,agcAttack:10,agcRatio:4,hfBoost:4,stereoWidth:45,eqLow:0,eqMid:1,eqHigh:2,compThreshold:-14,compRatio:4,masterVolume:0} },
+        'audiobook': { name:'Audiobook', mode:'Voice', lufs:-18, params:{lessmore:5,passthrough:2,agcThreshold:-24,agcAttack:6,agcRatio:2,hfBoost:3,stereoWidth:15,eqLow:-3,eqMid:1,eqHigh:2,compThreshold:-18,compRatio:2,masterVolume:2} },
+        'club-dj': { name:'Club/DJ', mode:'Music', lufs:-9, params:{lessmore:10,passthrough:-2,agcThreshold:-12,agcAttack:20,agcRatio:8,hfBoost:6,stereoWidth:85,eqLow:3,eqMid:0,eqHigh:4,compThreshold:-9,compRatio:8,masterVolume:-2} }
       },
       custom: JSON.parse(localStorage.getItem('customPresets')||'{}'),
       init() {
         document.querySelectorAll('.preset-btn').forEach(btn => {
           btn.addEventListener('click', () => this.load(btn.dataset.preset));
         });
+        
         document.getElementById('btn-save-preset').addEventListener('click', () => {
           const n = prompt('Nombre del preset:'); if(!n) return;
           const k = 'custom-'+Date.now();
-          this.custom[k] = { name:n, params:{...App.engine.params} };
+          // Guardar parámetros actuales del Engine y del I/O
+          this.custom[k] = { 
+            name:n, 
+            params:{
+              ...App.engine.params,
+              masterVolume: parseFloat(document.getElementById('master-volume').value),
+              stereoWidth: parseFloat(document.getElementById('stereo-width').value)
+            } 
+          };
           localStorage.setItem('customPresets', JSON.stringify(this.custom));
-          this.updateCustomSelect(); alert('Guardado: '+n);
+          this.updateCustomSelect(); alert('Preset guardado: '+n);
         });
+        
         document.getElementById('btn-del-preset').addEventListener('click', () => {
           const k = document.getElementById('custom-preset-select').value;
           if(k && k.startsWith('custom-') && confirm('¿Borrar '+this.custom[k].name+'?')) {
@@ -726,14 +849,39 @@
       load(key) {
         const p = this.data[key] || this.custom[key];
         if(!p) return;
+        
+        // UI Updates
         document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
         document.querySelector(`.preset-btn[data-preset="${key}"]`)?.classList.add('active');
         document.getElementById('active-preset-name').textContent = p.name + (this.custom[key]?' (Custom)':'');
         document.getElementById('display-mode').textContent = p.mode;
         document.getElementById('display-lufs').textContent = p.lufs + ' LUFS';
+        
+        // Aplicar parámetros a Engine y I/O
         Object.entries(p.params).forEach(([k,v]) => {
-          const slider = document.getElementById(k.replace(/([A-Z])/g,'-$1').toLowerCase());
-          if(slider) { slider.value = v; slider.dispatchEvent(new Event('input')); if(App.engine) App.engine.updateParam(k,v); }
+          const sliderId = k.replace(/([A-Z])/g,'-$1').toLowerCase();
+          const slider = document.getElementById(sliderId);
+          if(slider) { 
+            slider.value = v; 
+            slider.dispatchEvent(new Event('input')); 
+          }
+          
+          // Actualizar Engine
+          if(App.engine && ['agcThreshold','agcAttack','agcRatio','hfBoost','eqLow','eqMid','eqHigh','compThreshold','compRatio'].includes(k)) {
+            App.engine.updateParam(k,v);
+          }
+          
+          // Actualizar I/O directamente si es necesario
+          if(App.io) {
+            if(k === 'masterVolume') {
+               document.getElementById('master-volume').value = v;
+               document.getElementById('master-volume').dispatchEvent(new Event('input'));
+            }
+            if(k === 'stereoWidth') {
+               document.getElementById('stereo-width').value = v;
+               document.getElementById('stereo-width').dispatchEvent(new Event('input'));
+            }
+          }
         });
       },
       updateCustomSelect() {
@@ -763,6 +911,7 @@
           'passthrough': 'val-passthrough| dB',
           'agc-gate': 'val-agc| dB',
           'agc-attack': 'val-agc-attack| ms',
+          'agc-ratio': 'val-agc-ratio|:1',
           'hf-boost': 'val-hf| dB',
           'eq-low': 'val-eq-low| dB',
           'eq-mid': 'val-eq-mid| dB',
@@ -885,4 +1034,4 @@
     document.addEventListener('DOMContentLoaded', () => App.init());
   </script>
 </body>
-</html>  
+</html>
